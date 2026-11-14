@@ -9,7 +9,7 @@ import {
   index,
 } from "drizzle-orm/pg-core";
 
-import { users } from "./auth.schema.js";
+import { user } from "./auth.schema.js";
 import { datasets, datasetRecords } from "./dataset.schema.js";
 
 // Types of changes made to records
@@ -32,7 +32,7 @@ export const recordHistory = pgTable(
       .notNull()
       .references(() => datasets.id, { onDelete: "restrict" }),
 
-    changedBy: uuid("changed_by").references(() => users.id, {
+    changedBy: text("changed_by").references(() => user.id, {
       onDelete: "set null",
     }),
 

@@ -11,7 +11,7 @@ import {
   index,
 } from "drizzle-orm/pg-core";
 
-import { users } from "./auth.schema.js";
+import { user } from "./auth.schema.js";
 
 // Notification categories
 export const notificationTypeEnum = pgEnum(
@@ -32,9 +32,9 @@ export const notifications = pgTable(
   {
     id: uuid("id").defaultRandom().primaryKey(),
 
-    userId: uuid("user_id")
+    userId: text("user_id")
       .notNull()
-      .references(() => users.id, { onDelete: "cascade" }),
+      .references(() => user.id, { onDelete: "cascade" }),
 
     type: notificationTypeEnum("type").notNull(),
 

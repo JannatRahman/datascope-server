@@ -2,6 +2,7 @@
 import {
   pgTable,
   uuid,
+  text,
   varchar,
   integer,
   boolean,
@@ -10,7 +11,7 @@ import {
   uniqueIndex,
 } from "drizzle-orm/pg-core";
 
-import { users } from "./auth.schema.js";
+import { user } from "./auth.schema.js";
 
 // Stores individual user interface and dashboard preferences
 export const userPreferences = pgTable(
@@ -18,9 +19,9 @@ export const userPreferences = pgTable(
   {
     id: uuid("id").defaultRandom().primaryKey(),
 
-    userId: uuid("user_id")
+    userId: text("user_id")
       .notNull()
-      .references(() => users.id, { onDelete: "cascade" }),
+      .references(() => user.id, { onDelete: "cascade" }),
 
     // Appearance preferences
     theme: varchar("theme", { length: 20 })

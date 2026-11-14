@@ -1,14 +1,14 @@
-
 import {
   pgTable,
   pgEnum,
   uuid,
+  text,
   timestamp,
   primaryKey,
   index,
 } from "drizzle-orm/pg-core";
 
-import { users } from "./auth.schema.js";
+import { user } from "./auth.schema.js";
 import { datasets } from "./dataset.schema.js";
 
 // Dataset-specific access levels
@@ -25,15 +25,15 @@ export const datasetMembers = pgTable(
       .notNull()
       .references(() => datasets.id, { onDelete: "cascade" }),
 
-    userId: uuid("user_id")
+    userId: text("user_id")
       .notNull()
-      .references(() => users.id, { onDelete: "cascade" }),
+      .references(() => user.id, { onDelete: "cascade" }),
 
     accessLevel: datasetAccessLevelEnum("access_level")
       .default("viewer")
       .notNull(),
 
-    invitedBy: uuid("invited_by").references(() => users.id, {
+    invitedBy: text("invited_by").references(() => user.id, {
       onDelete: "set null",
     }),
 

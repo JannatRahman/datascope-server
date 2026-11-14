@@ -10,7 +10,7 @@ import {
   index,
 } from "drizzle-orm/pg-core";
 
-import { users } from "./auth.schema.js";
+import { user } from "./auth.schema.js";
 import { datasets } from "./dataset.schema.js";
 
 // Export job lifecycle
@@ -31,9 +31,9 @@ export const exportJobs = pgTable(
   {
     id: uuid("id").defaultRandom().primaryKey(),
 
-    userId: uuid("user_id")
+    userId: text("user_id")
       .notNull()
-      .references(() => users.id, { onDelete: "cascade" }),
+      .references(() => user.id, { onDelete: "cascade" }),
 
     datasetId: uuid("dataset_id")
       .notNull()

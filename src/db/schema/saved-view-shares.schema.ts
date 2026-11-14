@@ -1,13 +1,13 @@
-
 import {
   pgTable,
   uuid,
+  text,
   timestamp,
   index,
   primaryKey,
 } from "drizzle-orm/pg-core";
 
-import { users } from "./auth.schema.js";
+import { user } from "./auth.schema.js";
 import { savedViews } from "./saved-views.schema.js";
 
 // Controls which users can access a shared saved view
@@ -18,13 +18,13 @@ export const savedViewShares = pgTable(
       .notNull()
       .references(() => savedViews.id, { onDelete: "cascade" }),
 
-    sharedWithUserId: uuid("shared_with_user_id")
+    sharedWithUserId: text("shared_with_user_id")
       .notNull()
-      .references(() => users.id, { onDelete: "cascade" }),
+      .references(() => user.id, { onDelete: "cascade" }),
 
-    sharedByUserId: uuid("shared_by_user_id")
+    sharedByUserId: text("shared_by_user_id")
       .notNull()
-      .references(() => users.id, { onDelete: "cascade" }),
+      .references(() => user.id, { onDelete: "cascade" }),
 
     createdAt: timestamp("created_at", {
       withTimezone: true,

@@ -1,4 +1,3 @@
-
 import {
   pgTable,
   uuid,
@@ -10,7 +9,7 @@ import {
   index,
 } from "drizzle-orm/pg-core";
 
-import { users } from "./auth.schema.js";
+import { user } from "./auth.schema.js";
 import { datasets } from "./dataset.schema.js";
 
 // Stores saved search configurations for users
@@ -23,9 +22,9 @@ export const savedViews = pgTable(
 
     description: text("description"),
 
-    userId: uuid("user_id")
+    userId: text("user_id")
       .notNull()
-      .references(() => users.id, { onDelete: "cascade" }),
+      .references(() => user.id, { onDelete: "cascade" }),
 
     datasetId: uuid("dataset_id")
       .notNull()

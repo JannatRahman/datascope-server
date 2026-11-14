@@ -3,6 +3,7 @@ import {
   pgTable,
   pgEnum,
   uuid,
+  text,
   varchar,
   integer,
   boolean,
@@ -11,7 +12,7 @@ import {
   index,
 } from "drizzle-orm/pg-core";
 
-import { users } from "./auth.schema.js";
+import { user } from "./auth.schema.js";
 import { datasets } from "./dataset.schema.js";
 
 // Types of operations being monitored
@@ -34,7 +35,7 @@ export const queryPerformanceLogs = pgTable(
   {
     id: uuid("id").defaultRandom().primaryKey(),
 
-    userId: uuid("user_id").references(() => users.id, {
+    userId: text("user_id").references(() => user.id, {
       onDelete: "set null",
     }),
 

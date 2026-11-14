@@ -13,7 +13,7 @@ import {
   uniqueIndex,
 } from "drizzle-orm/pg-core";
 
-import { users } from "./auth.schema.js";
+import { user } from "./auth.schema.js";
 
 // Dataset status
 export const datasetStatusEnum = pgEnum("dataset_status", [
@@ -45,9 +45,9 @@ export const datasets = pgTable(
 
     dataSource: varchar("data_source", { length: 100 }),
 
-    ownerId: uuid("owner_id")
+    ownerId: text("owner_id")
       .notNull()
-      .references(() => users.id),
+      .references(() => user.id),
 
     status: datasetStatusEnum("status")
       .default("active")
@@ -124,16 +124,16 @@ export const datasetFields = pgTable(
       .notNull(),
   },
   (table) => [
-    index("dataset_records_dataset_id_idx").on(table.datasetId),
+    index("dataset_fields_dataset_id_idx").on(table.datasetId),
 
-    index("dataset_records_created_at_idx").on(table.createdAt),
+    index("dataset_fields_created_at_idx").on(table.createdAt),
 
-    index("dataset_records_dataset_created_idx").on(
+    index("dataset_fields_dataset_created_idx").on(
       table.datasetId,
       table.createdAt
     ),
 
-    uniqueIndex("dataset_records_dataset_id_id_unique").on(
+    uniqueIndex("dataset_fields_dataset_id_id_unique").on(
       table.datasetId,
       table.id
     ),
@@ -155,11 +155,11 @@ export const datasetRecords = pgTable(
       .default({})
       .notNull(),
 
-    createdBy: uuid("created_by")
-      .references(() => users.id),
+    createdBy: text("created_by")
+      .references(() => user.id),
 
-    updatedBy: uuid("updated_by")
-      .references(() => users.id),
+    updatedBy: text("updated_by")
+      .references(() => user.id),
 
     createdAt: timestamp("created_at", {
       withTimezone: true,
