@@ -41,6 +41,10 @@ export const datasets = pgTable(
 
     description: text("description"),
 
+    category: varchar("category", { length: 100 }),
+
+    dataSource: varchar("data_source", { length: 100 }),
+
     ownerId: uuid("owner_id")
       .notNull()
       .references(() => users.id),
@@ -60,6 +64,10 @@ export const datasets = pgTable(
     })
       .defaultNow()
       .notNull(),
+
+    deletedAt: timestamp("deleted_at", {
+      withTimezone: true,
+    }),
   },
   (table) => [
     index("datasets_owner_id_idx").on(table.ownerId),
@@ -116,11 +124,19 @@ export const datasetFields = pgTable(
       .notNull(),
   },
   (table) => [
-    uniqueIndex("dataset_fields_dataset_key_idx").on(
+    index("dataset_records_dataset_id_idx").on(table.datasetId),
+
+    index("dataset_records_created_at_idx").on(table.createdAt),
+
+    index("dataset_records_dataset_created_idx").on(
       table.datasetId,
-      table.fieldKey
+      table.createdAt
     ),
-    index("dataset_fields_dataset_id_idx").on(table.datasetId),
+
+    uniqueIndex("dataset_records_dataset_id_id_unique").on(
+      table.datasetId,
+      table.id
+    ),
   ]
 );
 
