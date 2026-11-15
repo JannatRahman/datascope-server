@@ -18,6 +18,12 @@ export const auth = betterAuth({
   emailAndPassword: {
     enabled: true,
   },
+  socialProviders: {
+    google: {
+      clientId: process.env['GOOGLE_CLIENT_ID'] || "",
+      clientSecret: process.env['GOOGLE_CLIENT_SECRET'] || "",
+    },
+  },
   plugins: [
     // Official Better Auth plugin to support Authorization: Bearer <token>
     // alongside standard HTTP-only session cookies

@@ -22,7 +22,7 @@ export const exportJobStatusEnum = pgEnum(
 // Supported export formats
 export const exportFormatEnum = pgEnum(
   "export_format",
-  ["csv"]
+  ["csv", "json"]
 );
 
 // Stores background data export requests

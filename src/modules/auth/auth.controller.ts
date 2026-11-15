@@ -56,6 +56,39 @@ export class AuthController {
   }
 
   /**
+   * Updates user profile (name, image)
+   */
+  @Post("profile")
+  @HttpCode(HttpStatus.OK)
+  @UseGuards(BetterAuthGuard)
+  async updateProfile(
+    @CurrentUser() user: AuthenticatedUser,
+    @Req() req: Request,
+  ) {
+    const { name, image } = req.body;
+    const updated = await this.authService.updateProfile(user.id, name, image);
+    return {
+      success: true,
+      message: "Profile updated successfully",
+      user: updated,
+    };
+  }
+
+  /**
+   * Change user password via Better Auth
+   */
+  @Post("change-password")
+  @HttpCode(HttpStatus.OK)
+  @UseGuards(BetterAuthGuard)
+  async changePassword(
+    @Req() req: Request,
+  ) {
+    const { currentPassword, newPassword } = req.body;
+    const result = await this.authService.changePassword(req.headers, currentPassword, newPassword);
+    return result;
+  }
+
+  /**
    * RBAC verification: Administrator role only.
    */
   @Get("admin-only")

@@ -215,4 +215,40 @@ export class AuthService {
       this.logger.warn(`Better Auth signOut error: ${error}`);
     }
   }
+
+  /**
+   * Update profile details (name, image)
+   */
+  async updateProfile(userId: string, name?: string, image?: string) {
+    const values: Record<string, unknown> = { updatedAt: new Date() };
+    if (name) values['name'] = name.trim();
+    if (image !== undefined) values['image'] = image;
+
+    const res = await this.db
+      .update(schema.user)
+      .set(values as any)
+      .where(eq(schema.user.id, userId))
+      .returning();
+
+    return res[0];
+  }
+
+  /**
+   * Change user password via Better Auth
+   */
+  async changePassword(headers: IncomingHttpHeaders, currentPassword: string, newPassword: string) {
+    try {
+      const result = await auth.api.changePassword({
+        headers: fromNodeHeaders(headers),
+        body: {
+          currentPassword,
+          newPassword,
+          revokeOtherSessions: true,
+        },
+      });
+      return { success: true, message: 'Password changed successfully', result };
+    } catch (err: any) {
+      throw new Error(err.message || 'Failed to change password');
+    }
+  }
 }
