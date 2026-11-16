@@ -4,7 +4,8 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "dev": "tsx watch src/index.ts",
+    "dev": "tsx watch src/main.ts",
+    "dev:legacy": "tsx watch src/index.ts",
     "dev:nest": "tsx watch src/main.ts",
     "build": "tsc",
     "build:nest": "nest build",
