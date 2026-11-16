@@ -190,6 +190,27 @@ export class AuthService {
     }
   }
 
+  async invalidateUserSessionCaches(userId: string): Promise<void> {
+    try {
+      const keys = await this.redisService.keys('auth:session:*');
+      if (!keys || keys.length === 0) return;
+      for (const key of keys) {
+        const raw = await this.redisService.get(key);
+        if (!raw) continue;
+        try {
+          const parsed = JSON.parse(raw) as { user?: { id?: string } };
+          if (parsed?.user?.id === userId) {
+            await this.redisService.del(key);
+          }
+        } catch {
+          // ignore
+        }
+      }
+    } catch (error) {
+      this.logger.warn(`Failed to invalidate user session caches for ${userId}: ${error}`);
+    }
+  }
+
   /**
    * Performs user logout by calling Better Auth signOut and invalidating Redis cache.
    */

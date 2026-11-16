@@ -20,12 +20,17 @@ export interface FilterRule {
   value?: unknown;
 }
 
+export interface RecordSortRule {
+  field: string;
+  order: 'asc' | 'desc';
+}
+
 export interface RecordQueryParams {
   page?: string | number;
   pageSize?: string | number;
   q?: string;
-  sortBy?: string;
-  sortOrder?: 'asc' | 'desc';
+  sortBy?: string | string[];
+  sortOrder?: string | string[];
   filters?: string | FilterRule[];
   filterLogic?: 'AND' | 'OR';
 }
@@ -49,6 +54,19 @@ export interface PaginatedRecordsResponse {
     total: number;
     totalPages: number;
   };
+}
+
+export interface RecordHistoryItem {
+  id: string;
+  recordId: string;
+  datasetId: string;
+  changedBy: string | null;
+  changedByName: string | null;
+  changeType: 'created' | 'updated' | 'deleted';
+  previousData: Record<string, unknown> | null;
+  newData: Record<string, unknown> | null;
+  changeDescription: string | null;
+  changedAt: string;
 }
 
 export interface RecordRelationshipItem {

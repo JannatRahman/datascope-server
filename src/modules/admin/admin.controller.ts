@@ -25,6 +25,13 @@ import {
   UpdateUserDto,
   UpdateRolePermissionsDto,
   AddDatasetMemberDto,
+  CreateDatasetDto,
+  UpdateDatasetDto,
+  CreateDatasetFieldDto,
+  UpdateDatasetFieldDto,
+  GenerateDatasetRecordsDto,
+  ImportDatasetRecordsDto,
+  UpdateSharedViewDto,
 } from './dto/admin.dto.js';
 
 @ApiTags('Admin')
@@ -52,10 +59,12 @@ export class AdminController {
     @Query('q') q?: string,
     @Query('page') page?: string,
     @Query('pageSize') pageSize?: string,
+    @Query('roleId') roleId?: string,
+    @Query('status') status?: string,
   ) {
     const p = Math.max(1, Number(page) || 1);
     const ps = Math.min(100, Math.max(1, Number(pageSize) || 25));
-    const result = await this.adminService.getUsers(q, p, ps);
+    const result = await this.adminService.getUsers(q, p, ps, roleId, status);
     return { success: true, ...result };
   }
 
@@ -91,6 +100,30 @@ export class AdminController {
   ) {
     const result = await this.adminService.deleteUser(userId, user);
     return result;
+  }
+
+  @Get('users/:userId/activity')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Get a single user activity timeline and summary' })
+  async getUserActivity(
+    @Param('userId') userId: string,
+    @Query('page') page?: string,
+    @Query('pageSize') pageSize?: string,
+  ) {
+    const p = Math.max(1, Number(page) || 1);
+    const ps = Math.min(100, Math.max(1, Number(pageSize) || 20));
+    const result = await this.adminService.getUserActivity(userId, p, ps);
+    return { success: true, ...result };
+  }
+
+  @Post('users/:userId/reset-access')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Force-reset user access and revoke all sessions' })
+  async resetUserAccess(
+    @Param('userId') userId: string,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.adminService.resetUserAccess(userId, user);
   }
 
   @Get('roles')
@@ -141,6 +174,110 @@ export class AdminController {
     return { success: true, data };
   }
 
+  @Post('datasets')
+  @HttpCode(HttpStatus.CREATED)
+  @ApiOperation({ summary: 'Create a new dataset with field definitions' })
+  async createDataset(
+    @Body() dto: CreateDatasetDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    const data = await this.adminService.createDataset(dto, user);
+    return { success: true, data };
+  }
+
+  @Patch('datasets/:datasetId')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Update dataset metadata or status' })
+  async updateDataset(
+    @Param('datasetId') datasetId: string,
+    @Body() dto: UpdateDatasetDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    const data = await this.adminService.updateDataset(datasetId, dto, user);
+    return { success: true, data };
+  }
+
+  @Delete('datasets/:datasetId')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Delete a dataset and all dependent data' })
+  async deleteDataset(
+    @Param('datasetId') datasetId: string,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.adminService.deleteDataset(datasetId, user);
+  }
+
+  @Get('datasets/:datasetId/fields')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'List field definitions for a dataset' })
+  async getDatasetFields(@Param('datasetId') datasetId: string) {
+    const data = await this.adminService.getDatasetFields(datasetId);
+    return { success: true, data };
+  }
+
+  @Post('datasets/:datasetId/fields')
+  @HttpCode(HttpStatus.CREATED)
+  @ApiOperation({ summary: 'Add a field definition to a dataset' })
+  async createDatasetField(
+    @Param('datasetId') datasetId: string,
+    @Body() dto: CreateDatasetFieldDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    const data = await this.adminService.createDatasetField(datasetId, dto, user);
+    return { success: true, data };
+  }
+
+  @Patch('datasets/:datasetId/fields/:fieldId')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Update a dataset field definition' })
+  async updateDatasetField(
+    @Param('datasetId') datasetId: string,
+    @Param('fieldId') fieldId: string,
+    @Body() dto: UpdateDatasetFieldDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    const data = await this.adminService.updateDatasetField(
+      datasetId,
+      fieldId,
+      dto,
+      user,
+    );
+    return { success: true, data };
+  }
+
+  @Delete('datasets/:datasetId/fields/:fieldId')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Delete a dataset field definition' })
+  async deleteDatasetField(
+    @Param('datasetId') datasetId: string,
+    @Param('fieldId') fieldId: string,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.adminService.deleteDatasetField(datasetId, fieldId, user);
+  }
+
+  @Post('datasets/:datasetId/generate')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Generate synthetic records based on field definitions' })
+  async generateDatasetRecords(
+    @Param('datasetId') datasetId: string,
+    @Body() dto: GenerateDatasetRecordsDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.adminService.generateDatasetRecords(datasetId, dto, user);
+  }
+
+  @Post('datasets/:datasetId/import')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Import JSON records into a dataset' })
+  async importDatasetRecords(
+    @Param('datasetId') datasetId: string,
+    @Body() dto: ImportDatasetRecordsDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.adminService.importDatasetRecords(datasetId, dto, user);
+  }
+
   @Post('datasets/:datasetId/members')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Add or update member access on dataset' })
@@ -171,6 +308,36 @@ export class AdminController {
       user,
     );
     return result;
+  }
+
+  @Get('shared-views')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'List saved views and their sharing status' })
+  async getSharedViews() {
+    const data = await this.adminService.getSharedViews();
+    return { success: true, data };
+  }
+
+  @Patch('shared-views/:viewId')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Enable or disable sharing for a saved view' })
+  async updateSharedView(
+    @Param('viewId') viewId: string,
+    @Body() dto: UpdateSharedViewDto,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    const data = await this.adminService.updateSharedView(viewId, dto, user);
+    return { success: true, data };
+  }
+
+  @Delete('shared-views/:viewId')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Delete a shared saved view' })
+  async deleteSharedView(
+    @Param('viewId') viewId: string,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.adminService.deleteSharedView(viewId, user);
   }
 
   @Get('activity-logs')

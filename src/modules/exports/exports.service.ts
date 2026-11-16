@@ -38,13 +38,16 @@ export class ExportsService {
     dto: CreateExportDto,
     user: AuthenticatedUser,
   ): Promise<ExportJobItem> {
-    // 1. RBAC Check: Viewers cannot export data
-    if (user.roleName === ROLES.VIEWER) {
-      throw new ForbiddenException('Viewers do not have permission to export dataset records');
+    // 1. Validate dataset access and resolve the user's dataset-level access level
+    const dataset = await this.datasetsService.findOneForUser(datasetId, user);
+
+    // 2. RBAC Check: Viewers require manager-level dataset access to export data
+    if (user.roleName === ROLES.VIEWER && dataset.accessLevel !== 'manager') {
+      throw new ForbiddenException(
+        'Viewers require manager-level dataset access to export dataset records',
+      );
     }
 
-    // 2. Validate dataset access
-    const dataset = await this.datasetsService.findOneForUser(datasetId, user);
     const format = dto.format === 'json' ? 'json' : 'csv';
 
     // 3. Create initial processing job in export_jobs
@@ -168,24 +171,49 @@ export class ExportsService {
           const jsonAccess = `"record_data"->>'${safeKey}'`;
 
           switch (rule.operator) {
-            case 'equals':
+            case 'equals': {
               if (rule.value === undefined || rule.value === null || rule.value === '') break;
               if (fieldDef.dataType === 'number') {
                 params.push(Number(rule.value));
                 filterClauses.push(`((${jsonAccess})::numeric = $${params.length})`);
+              } else if (fieldDef.dataType === 'boolean') {
+                params.push(rule.value === true || rule.value === 'true');
+                filterClauses.push(`((${jsonAccess})::boolean = $${params.length})`);
               } else {
                 params.push(String(rule.value));
                 filterClauses.push(`(${jsonAccess} = $${params.length})`);
               }
               break;
-            case 'not_equals':
+            }
+            case 'not_equals': {
               if (rule.value === undefined || rule.value === null || rule.value === '') break;
-              params.push(String(rule.value));
-              filterClauses.push(`(${jsonAccess} != $${params.length} OR ${jsonAccess} IS NULL)`);
+              if (fieldDef.dataType === 'number') {
+                params.push(Number(rule.value));
+                filterClauses.push(`((${jsonAccess})::numeric != $${params.length} OR ${jsonAccess} IS NULL)`);
+              } else {
+                params.push(String(rule.value));
+                filterClauses.push(`(${jsonAccess} != $${params.length} OR ${jsonAccess} IS NULL)`);
+              }
               break;
+            }
             case 'contains':
               if (!rule.value) break;
               params.push(`%${rule.value}%`);
+              filterClauses.push(`(${jsonAccess} ILIKE $${params.length})`);
+              break;
+            case 'not_contains':
+              if (!rule.value) break;
+              params.push(`%${rule.value}%`);
+              filterClauses.push(`(${jsonAccess} NOT ILIKE $${params.length} OR ${jsonAccess} IS NULL)`);
+              break;
+            case 'starts_with':
+              if (!rule.value) break;
+              params.push(`${rule.value}%`);
+              filterClauses.push(`(${jsonAccess} ILIKE $${params.length})`);
+              break;
+            case 'ends_with':
+              if (!rule.value) break;
+              params.push(`%${rule.value}`);
               filterClauses.push(`(${jsonAccess} ILIKE $${params.length})`);
               break;
             case 'gt':
@@ -195,10 +223,47 @@ export class ExportsService {
               if (rule.value === undefined || rule.value === null || rule.value === '') break;
               const opSign =
                 rule.operator === 'gt' ? '>' : rule.operator === 'gte' ? '>=' : rule.operator === 'lt' ? '<' : '<=';
-              params.push(Number(rule.value));
-              filterClauses.push(`((${jsonAccess})::numeric ${opSign} $${params.length})`);
+              if (fieldDef.dataType === 'date') {
+                params.push(rule.value);
+                filterClauses.push(`((${jsonAccess})::timestamptz ${opSign} $${params.length}::timestamptz)`);
+              } else {
+                params.push(Number(rule.value));
+                filterClauses.push(`((${jsonAccess})::numeric ${opSign} $${params.length})`);
+              }
               break;
             }
+            case 'between': {
+              if (!Array.isArray(rule.value) || rule.value.length < 2) break;
+              const [val1, val2] = rule.value;
+              if (fieldDef.dataType === 'date') {
+                params.push(val1);
+                const p1 = params.length;
+                params.push(val2);
+                const p2 = params.length;
+                filterClauses.push(
+                  `((${jsonAccess})::timestamptz BETWEEN $${p1}::timestamptz AND $${p2}::timestamptz)`,
+                );
+              } else {
+                params.push(Number(val1));
+                const p1 = params.length;
+                params.push(Number(val2));
+                const p2 = params.length;
+                filterClauses.push(`((${jsonAccess})::numeric BETWEEN $${p1} AND $${p2})`);
+              }
+              break;
+            }
+            case 'in': {
+              if (!Array.isArray(rule.value) || rule.value.length === 0) break;
+              params.push(rule.value.map(String));
+              filterClauses.push(`(${jsonAccess} = ANY($${params.length}))`);
+              break;
+            }
+            case 'is_null':
+              filterClauses.push(`(${jsonAccess} IS NULL OR "record_data"->'${safeKey}' = 'null'::jsonb)`);
+              break;
+            case 'is_not_null':
+              filterClauses.push(`(${jsonAccess} IS NOT NULL AND "record_data"->'${safeKey}' != 'null'::jsonb)`);
+              break;
           }
         }
 
@@ -208,13 +273,58 @@ export class ExportsService {
         }
       }
 
-      // Sorting
-      let orderExpression = 'created_at';
-      if (dto.sortBy && fieldMap.has(dto.sortBy)) {
-        const safeSortKey = dto.sortBy.replace(/'/g, "''");
-        orderExpression = `"record_data"->>'${safeSortKey}'`;
+      // Explicit record selection for individual/multi-row exports
+      if (Array.isArray(dto.recordIds) && dto.recordIds.length > 0) {
+        const recordIds = dto.recordIds
+          .filter((id) => typeof id === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id))
+          .slice(0, 5000);
+        if (recordIds.length > 0) {
+          params.push(recordIds);
+          whereConditions.push(`id = ANY($${params.length}::uuid[])`);
+        }
       }
-      const sortOrder = dto.sortOrder?.toLowerCase() === 'desc' ? 'DESC' : 'ASC';
+
+      // Multi-column Sorting
+      const requestedSortFields = Array.isArray(dto.sortBy)
+        ? dto.sortBy
+        : typeof dto.sortBy === 'string'
+          ? dto.sortBy.split(',')
+          : [];
+      const requestedSortOrders = Array.isArray(dto.sortOrder)
+        ? dto.sortOrder
+        : typeof dto.sortOrder === 'string'
+          ? dto.sortOrder.split(',')
+          : [];
+
+      const buildSortExpression = (field: string): string | null => {
+        if (field === 'created_at' || field === 'createdAt') return 'created_at';
+        if (field === 'updated_at' || field === 'updatedAt') return 'updated_at';
+        if (field === 'id') return 'id';
+        const fieldDef = fieldMap.get(field);
+        if (!fieldDef) return null;
+        const safe = field.replace(/'/g, "''");
+        if (fieldDef.dataType === 'number') return `("record_data"->>'${safe}')::numeric`;
+        if (fieldDef.dataType === 'date') return `("record_data"->>'${safe}')::timestamptz`;
+        if (fieldDef.dataType === 'boolean') return `("record_data"->>'${safe}')::boolean`;
+        return `"record_data"->>'${safe}'`;
+      };
+
+      const orderClauses: string[] = [];
+      requestedSortFields
+        .map((f) => f.trim())
+        .filter(Boolean)
+        .slice(0, 5)
+        .forEach((field, index) => {
+          const expression = buildSortExpression(field);
+          if (expression) {
+            const order = requestedSortOrders[index]?.toLowerCase() === 'desc' ? 'DESC' : 'ASC';
+            orderClauses.push(`${expression} ${order} NULLS LAST`);
+          }
+        });
+      if (!requestedSortFields.includes('id')) {
+        orderClauses.push('id ASC');
+      }
+      const orderByClause = orderClauses.length > 0 ? orderClauses.join(', ') : 'created_at ASC, id ASC';
       const whereClause = whereConditions.join(' AND ');
 
       // Total count
@@ -265,7 +375,7 @@ export class ExportsService {
           SELECT record_data AS "recordData"
           FROM dataset_records
           WHERE ${whereClause}
-          ORDER BY ${orderExpression} ${sortOrder} NULLS LAST, id ASC
+          ORDER BY ${orderByClause}
           LIMIT $${params.length + 1} OFFSET $${params.length + 2};
         `;
 

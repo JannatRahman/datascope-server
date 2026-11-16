@@ -15,6 +15,7 @@ import { ExportsModule } from './modules/exports/exports.module.js';
 import { SearchHistoryModule } from './modules/search-history/search-history.module.js';
 import { NotificationsModule } from './modules/notifications/notifications.module.js';
 import { AnalyticsModule } from './modules/analytics/analytics.module.js';
+import { SystemSettingsModule } from './modules/system-settings/system-settings.module.js';
 
 @Module({
   imports: [
@@ -33,6 +34,7 @@ import { AnalyticsModule } from './modules/analytics/analytics.module.js';
     SearchHistoryModule,
     NotificationsModule,
     AnalyticsModule,
+    SystemSettingsModule,
   ],
 })
 export class AppModule {}

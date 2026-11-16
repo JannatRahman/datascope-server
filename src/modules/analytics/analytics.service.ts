@@ -2,6 +2,8 @@ import { Injectable, Inject, Logger } from '@nestjs/common';
 import type { Pool } from 'pg';
 import { PG_POOL } from '../../core/constants.js';
 import { RedisService } from '../../core/redis/redis.service.js';
+import { DatasetsService } from '../datasets/datasets.service.js';
+import { AuthenticatedUser } from '../auth/types/auth.types.js';
 
 @Injectable()
 export class AnalyticsService {
@@ -10,6 +12,7 @@ export class AnalyticsService {
   constructor(
     @Inject(PG_POOL) private readonly pool: Pool,
     @Inject(RedisService) private readonly redisService: RedisService,
+    @Inject(DatasetsService) private readonly datasetsService: DatasetsService,
   ) {}
 
   /**
@@ -30,6 +33,8 @@ export class AnalyticsService {
       searchActivity,
       queryPerformance,
       activityDistribution,
+      growthTrends,
+      frequentFilters,
     ] = await Promise.all([
       this.getDatasetDistribution(),
       this.getSalesPaymentStatusDistribution(),
@@ -38,6 +43,8 @@ export class AnalyticsService {
       this.getSearchActivity(),
       this.getQueryPerformance(),
       this.getActivityDistribution(),
+      this.getGrowthTrends(),
+      this.getFrequentFilters(),
     ]);
 
     const result = {
@@ -47,9 +54,13 @@ export class AnalyticsService {
         shipmentStatuses,
         employeeStatuses,
       },
-      searchActivity,
+      searchActivity: {
+        ...searchActivity,
+        frequentFilters,
+      },
       queryPerformance,
       activityDistribution,
+      growthTrends,
       timestamp: new Date().toISOString(),
     };
 
@@ -58,6 +69,89 @@ export class AnalyticsService {
     } catch {}
 
     return result;
+  }
+
+  /**
+   * Dataset-scoped analytics for analysts with access to the dataset.
+   */
+  async getDatasetAnalytics(datasetId: string, user: AuthenticatedUser) {
+    const dataset = await this.datasetsService.findOneForUser(datasetId, user);
+    const fields = await this.datasetsService.findFieldsForDataset(datasetId, user);
+
+    const statusField =
+      fields.find((f) => f.fieldKey === 'status' && f.dataType === 'text') ??
+      fields.find((f) => f.dataType === 'text' && Array.isArray((f.fieldConfig as { options?: unknown })?.options));
+    const categoryField =
+      fields.find((f) => f.fieldKey === 'category' && f.dataType === 'text') ??
+      fields.find(
+        (f) => f.fieldKey !== statusField?.fieldKey && f.dataType === 'text' &&
+          Array.isArray((f.fieldConfig as { options?: unknown })?.options),
+      );
+
+    const getDistribution = async (fieldKey?: string) => {
+      if (!fieldKey) return [];
+      const res = await this.pool.query(
+        `SELECT COALESCE(record_data->>$2, 'Unknown') AS "value", count(*)::integer AS count
+         FROM dataset_records
+         WHERE dataset_id = $1
+         GROUP BY "value"
+         ORDER BY count DESC`,
+        [datasetId, fieldKey],
+      );
+      return res.rows;
+    };
+
+    const [statusDistribution, categoryDistribution, growthRes, searchRes, topQueriesRes] =
+      await Promise.all([
+        getDistribution(statusField?.fieldKey),
+        getDistribution(categoryField?.fieldKey),
+        this.pool.query(
+          `WITH months AS (
+             SELECT generate_series(
+               date_trunc('month', NOW()) - INTERVAL '5 months',
+               date_trunc('month', NOW()),
+               INTERVAL '1 month'
+             ) AS month
+           )
+           SELECT
+             to_char(m.month, 'YYYY-MM') AS month,
+             (SELECT count(*)::integer FROM dataset_records dr
+               WHERE dr.dataset_id = $1 AND date_trunc('month', dr.created_at) = m.month) AS records
+           FROM months m
+           ORDER BY m.month ASC`,
+          [datasetId],
+        ),
+        this.pool.query(
+          `SELECT count(*)::integer AS "totalSearches",
+                  COALESCE(AVG(execution_time_ms), 0)::integer AS "avgExecutionTimeMs"
+           FROM search_history
+           WHERE dataset_id = $1`,
+          [datasetId],
+        ),
+        this.pool.query(
+          `SELECT search_query AS query, count(*)::integer AS count
+           FROM search_history
+           WHERE dataset_id = $1
+           GROUP BY search_query
+           ORDER BY count DESC
+           LIMIT 10`,
+          [datasetId],
+        ),
+      ]);
+
+    return {
+      dataset,
+      statusField: statusField ?? null,
+      categoryField: categoryField ?? null,
+      statusDistribution,
+      categoryDistribution,
+      growthTrends: growthRes.rows,
+      searchActivity: {
+        ...(searchRes.rows[0] ?? { totalSearches: 0, avgExecutionTimeMs: 0 }),
+        topQueries: topQueriesRes.rows,
+      },
+      timestamp: new Date().toISOString(),
+    };
   }
 
   /**
@@ -211,6 +305,47 @@ export class AnalyticsService {
       cacheMisses: row.cacheMisses,
       cacheHitRate: total > 0 ? Math.round((row.cacheHits / total) * 100) : 85,
     };
+  }
+
+  /**
+   * Dataset, record and user growth over the last six months
+   */
+  async getGrowthTrends() {
+    const res = await this.pool.query(`
+      WITH months AS (
+        SELECT generate_series(
+          date_trunc('month', NOW()) - INTERVAL '5 months',
+          date_trunc('month', NOW()),
+          INTERVAL '1 month'
+        ) AS month
+      )
+      SELECT
+        to_char(m.month, 'YYYY-MM') AS month,
+        (SELECT count(*)::integer FROM "user" u WHERE date_trunc('month', u.created_at) = m.month) AS users,
+        (SELECT count(*)::integer FROM datasets d WHERE date_trunc('month', d.created_at) = m.month) AS datasets,
+        (SELECT count(*)::integer FROM dataset_records dr WHERE date_trunc('month', dr.created_at) = m.month) AS records
+      FROM months m
+      ORDER BY m.month ASC
+    `);
+
+    return res.rows;
+  }
+
+  /**
+   * Most frequently applied search filters
+   */
+  async getFrequentFilters() {
+    const res = await this.pool.query(`
+      SELECT key, value, count(*)::integer AS count
+      FROM search_history sh,
+           LATERAL jsonb_each_text(sh.filters)
+      WHERE jsonb_typeof(sh.filters) = 'object'
+      GROUP BY key, value
+      ORDER BY count DESC
+      LIMIT 10
+    `);
+
+    return res.rows;
   }
 
   /**

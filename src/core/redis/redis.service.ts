@@ -28,6 +28,10 @@ export class RedisService {
     return this.client.del(key);
   }
 
+  async keys(pattern: string): Promise<string[]> {
+    return this.client.keys(pattern);
+  }
+
   async invalidatePattern(pattern: string): Promise<void> {
     const keys = await this.client.keys(pattern);
     if (keys.length > 0) {

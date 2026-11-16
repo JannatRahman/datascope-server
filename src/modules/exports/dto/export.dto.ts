@@ -4,9 +4,10 @@ export interface CreateExportDto {
   format?: 'csv' | 'json';
   filters?: FilterRule[] | string;
   filterLogic?: 'AND' | 'OR';
-  sortBy?: string;
-  sortOrder?: 'asc' | 'desc';
+  sortBy?: string | string[];
+  sortOrder?: string | string[];
   selectedFields?: string[];
+  recordIds?: string[];
 }
 
 export interface ExportJobItem {

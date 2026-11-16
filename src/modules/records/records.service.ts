@@ -15,6 +15,8 @@ import {
   RecordListItem,
   PaginatedRecordsResponse,
   RecordRelationshipItem,
+  RecordHistoryItem,
+  RecordSortRule,
 } from './dto/record-query.dto.js';
 
 @Injectable()
@@ -34,6 +36,7 @@ export class RecordsService {
     query: RecordQueryParams,
     user: AuthenticatedUser,
   ): Promise<PaginatedRecordsResponse> {
+    const startedAt = Date.now();
     await this.datasetsService.checkDatasetAccess(datasetId, user);
     const fields = await this.datasetsService.findFieldsForDataset(datasetId, user);
     const fieldMap = new Map(fields.map((f) => [f.fieldKey, f]));
@@ -201,25 +204,61 @@ export class RecordsService {
       }
     }
 
-    // 3. Sorting & Whitelisting
-    let orderExpression = 'created_at';
-    if (query.sortBy && fieldMap.has(query.sortBy)) {
-      const sortField = fieldMap.get(query.sortBy)!;
-      const safeSortKey = query.sortBy.replace(/'/g, "''");
-      if (sortField.dataType === 'number') {
-        orderExpression = `("record_data"->>'${safeSortKey}')::numeric`;
-      } else if (sortField.dataType === 'date') {
-        orderExpression = `("record_data"->>'${safeSortKey}')::timestamptz`;
-      } else if (sortField.dataType === 'boolean') {
-        orderExpression = `("record_data"->>'${safeSortKey}')::boolean`;
-      } else {
-        orderExpression = `"record_data"->>'${safeSortKey}'`;
-      }
-    } else if (query.sortBy === 'id') {
-      orderExpression = 'id';
-    }
+    // 3. Sorting & Whitelisting (supports multi-column sort)
+    const requestedSortFields = Array.isArray(query.sortBy)
+      ? query.sortBy
+      : typeof query.sortBy === 'string'
+        ? query.sortBy.split(',')
+        : [];
+    const requestedSortOrders = Array.isArray(query.sortOrder)
+      ? query.sortOrder
+      : typeof query.sortOrder === 'string'
+        ? query.sortOrder.split(',')
+        : [];
 
-    const sortOrder = query.sortOrder?.toLowerCase() === 'desc' ? 'DESC' : 'ASC';
+    const sortRules: RecordSortRule[] = [];
+    requestedSortFields
+      .map((f) => f.trim())
+      .filter(Boolean)
+      .slice(0, 5)
+      .forEach((field, index) => {
+        sortRules.push({
+          field,
+          order: requestedSortOrders[index]?.toLowerCase() === 'desc' ? 'desc' : 'asc',
+        });
+      });
+
+    const buildSortExpression = (field: string): string | null => {
+      if (field === 'id') return 'id';
+      if (field === 'created_at' || field === 'createdAt') return 'created_at';
+      if (field === 'updated_at' || field === 'updatedAt') return 'updated_at';
+      const fieldDef = fieldMap.get(field);
+      if (!fieldDef) return null;
+      const safeSortKey = field.replace(/'/g, "''");
+      if (fieldDef.dataType === 'number') {
+        return `("record_data"->>'${safeSortKey}')::numeric`;
+      }
+      if (fieldDef.dataType === 'date') {
+        return `("record_data"->>'${safeSortKey}')::timestamptz`;
+      }
+      if (fieldDef.dataType === 'boolean') {
+        return `("record_data"->>'${safeSortKey}')::boolean`;
+      }
+      return `"record_data"->>'${safeSortKey}'`;
+    };
+
+    const orderClauses: string[] = [];
+    for (const rule of sortRules) {
+      const expression = buildSortExpression(rule.field);
+      if (expression) {
+        orderClauses.push(`${expression} ${rule.order === 'desc' ? 'DESC' : 'ASC'} NULLS LAST`);
+      }
+    }
+    if (!sortRules.some((r) => r.field === 'id')) {
+      orderClauses.push('id ASC');
+    }
+    const orderByClause = orderClauses.length > 0 ? orderClauses.join(', ') : 'created_at ASC, id ASC';
+
     const whereClause = `WHERE ${whereConditions.join(' AND ')}`;
 
     // 4. Count query
@@ -243,12 +282,63 @@ export class RecordsService {
         updated_at AS "updatedAt"
       FROM dataset_records
       ${whereClause}
-      ORDER BY ${orderExpression} ${sortOrder} NULLS LAST, id ASC
+      ORDER BY ${orderByClause}
       LIMIT $${params.length + 1} OFFSET $${params.length + 2};
     `;
 
     const rowsResult = await this.pool.query(rowsQuery, [...params, pageSize, offset]);
     const data: RecordListItem[] = rowsResult.rows;
+
+    // 6. Record search history + query telemetry (non-blocking)
+    const quickSearch = typeof query.q === 'string' ? query.q.trim() : '';
+    const hasSearchActivity = quickSearch.length > 0 || filters.length > 0;
+    const executionTimeMs = Date.now() - startedAt;
+
+    if (hasSearchActivity && page === 1) {
+      const filterSummary = filters
+        .map((rule) => {
+          const label = fieldMap.get(rule.field)?.fieldLabel ?? rule.field;
+          const value = Array.isArray(rule.value) ? rule.value.join('..') : String(rule.value ?? '');
+          return `${label} ${rule.operator} ${value}`.trim();
+        })
+        .join(' & ');
+      const searchText = (quickSearch || `Filtered view: ${filterSummary}`).slice(0, 500);
+
+      void this.pool
+        .query(
+          `INSERT INTO search_history (
+             user_id, dataset_id, search_query, filters, sort_config, result_count, execution_time_ms, searched_at
+           ) VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())`,
+          [
+            user.id,
+            datasetId,
+            searchText,
+            JSON.stringify(filters),
+            JSON.stringify(sortRules),
+            total,
+            executionTimeMs,
+          ],
+        )
+        .catch((err) => this.logger.warn(`Failed to record search history: ${err?.message}`));
+    }
+
+    const operation = filters.length > 0 ? 'filter' : quickSearch ? 'search' : 'pagination';
+    void this.pool
+      .query(
+        `INSERT INTO query_performance_logs (
+           user_id, dataset_id, operation, endpoint, execution_time_ms, records_returned, cache_hit, metadata, created_at
+         ) VALUES ($1, $2, $3, $4, $5, $6, false, $7, NOW())`,
+        [
+          user.id,
+          datasetId,
+          operation,
+          'GET /api/v1/datasets/:datasetId/records',
+          executionTimeMs,
+          data.length,
+          JSON.stringify({ page, pageSize, total, sortRules }),
+        ],
+      )
+      .catch((err) => this.logger.warn(`Failed to record query telemetry: ${err?.message}`));
 
     return {
       success: true,
@@ -291,6 +381,39 @@ export class RecordsService {
     }
 
     return result.rows[0];
+  }
+
+  /**
+   * Get historical change log for a record.
+   */
+  async findRecordHistory(
+    datasetId: string,
+    recordId: string,
+    user: AuthenticatedUser,
+  ): Promise<RecordHistoryItem[]> {
+    await this.datasetsService.checkDatasetAccess(datasetId, user);
+
+    const query = `
+      SELECT
+        rh.id,
+        rh.record_id AS "recordId",
+        rh.dataset_id AS "datasetId",
+        rh.changed_by AS "changedBy",
+        u.name AS "changedByName",
+        rh.change_type AS "changeType",
+        rh.previous_data AS "previousData",
+        rh.new_data AS "newData",
+        rh.change_description AS "changeDescription",
+        rh.changed_at AS "changedAt"
+      FROM record_history rh
+      LEFT JOIN "user" u ON u.id = rh.changed_by
+      WHERE rh.dataset_id = $1 AND rh.record_id = $2
+      ORDER BY rh.changed_at DESC
+      LIMIT 100;
+    `;
+
+    const result = await this.pool.query(query, [datasetId, recordId]);
+    return result.rows;
   }
 
   /**

@@ -18,6 +18,7 @@ import {
   PaginatedRecordsResponse,
   RecordListItem,
   RecordRelationshipItem,
+  RecordHistoryItem,
 } from './dto/record-query.dto.js';
 
 @ApiTags('Records')
@@ -64,6 +65,21 @@ export class RecordsController {
     @CurrentUser() user: AuthenticatedUser,
   ): Promise<{ success: boolean; data: RecordListItem }> {
     const data = await this.recordsService.findRecordById(datasetId, recordId, user);
+    return { success: true, data };
+  }
+
+  @Get(':recordId/history')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Get historical change log for a record' })
+  @ApiResponse({ status: 200, description: 'Record change history' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  @ApiResponse({ status: 403, description: 'Forbidden: No access to this dataset' })
+  async findRecordHistory(
+    @Param('datasetId') datasetId: string,
+    @Param('recordId') recordId: string,
+    @CurrentUser() user: AuthenticatedUser,
+  ): Promise<{ success: boolean; data: RecordHistoryItem[] }> {
+    const data = await this.recordsService.findRecordHistory(datasetId, recordId, user);
     return { success: true, data };
   }
 

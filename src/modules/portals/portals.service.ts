@@ -80,12 +80,38 @@ export class PortalsService {
       WHERE user_id = $1
     `;
 
-    const [datasetsRes, searchesRes, savedViewsRes, perfRes] = await Promise.all([
-      this.pool.query(datasetsQuery, [user.roleName, user.id]),
-      this.pool.query(searchesQuery, [user.id]),
-      this.pool.query(savedViewsQuery, [user.id]),
-      this.pool.query(perfQuery, [user.id]),
-    ]);
+    // Recently accessed datasets derived from search history and query telemetry
+    const recentDatasetsQuery = `
+      SELECT
+        d.id,
+        d.name,
+        d.description,
+        d.category,
+        max(access.last_seen) AS "lastAccessedAt"
+      FROM (
+        SELECT dataset_id, searched_at AS last_seen
+        FROM search_history
+        WHERE user_id = $1 AND dataset_id IS NOT NULL
+        UNION ALL
+        SELECT dataset_id, created_at AS last_seen
+        FROM query_performance_logs
+        WHERE user_id = $1 AND dataset_id IS NOT NULL
+      ) access
+      JOIN datasets d ON d.id = access.dataset_id
+      WHERE d.status = 'active'
+      GROUP BY d.id, d.name, d.description, d.category
+      ORDER BY "lastAccessedAt" DESC
+      LIMIT 6
+    `;
+
+    const [datasetsRes, searchesRes, savedViewsRes, perfRes, recentDatasetsRes] =
+      await Promise.all([
+        this.pool.query(datasetsQuery, [user.roleName, user.id]),
+        this.pool.query(searchesQuery, [user.id]),
+        this.pool.query(savedViewsQuery, [user.id]),
+        this.pool.query(perfQuery, [user.id]),
+        this.pool.query(recentDatasetsQuery, [user.id]),
+      ]);
 
     const perf = perfRes.rows[0] ?? { totalQueries: 0, avgLatencyMs: 0 };
     const datasets = datasetsRes.rows;
@@ -102,6 +128,7 @@ export class PortalsService {
       datasets,
       recentSearches: searchesRes.rows,
       savedViews: savedViewsRes.rows,
+      recentlyAccessedDatasets: recentDatasetsRes.rows,
     };
   }
 
@@ -146,9 +173,52 @@ export class PortalsService {
       LIMIT 6
     `;
 
-    const [datasetsRes, savedViewsRes] = await Promise.all([
+    const recentDatasetsQuery = `
+      SELECT
+        d.id,
+        d.name,
+        d.description,
+        d.category,
+        COALESCE(rc.cnt, 0)::integer AS "recordCount",
+        COALESCE(fc.cnt, 0)::integer AS "fieldCount",
+        max(access.last_seen) AS "lastAccessedAt"
+      FROM (
+        SELECT dataset_id, searched_at AS last_seen
+        FROM search_history
+        WHERE user_id = $1 AND dataset_id IS NOT NULL
+        UNION ALL
+        SELECT dataset_id, created_at AS last_seen
+        FROM query_performance_logs
+        WHERE user_id = $1 AND dataset_id IS NOT NULL
+      ) access
+      JOIN datasets d ON d.id = access.dataset_id
+      LEFT JOIN (SELECT dataset_id, count(*)::integer AS cnt FROM dataset_records GROUP BY dataset_id) rc ON rc.dataset_id = d.id
+      LEFT JOIN (SELECT dataset_id, count(*)::integer AS cnt FROM dataset_fields GROUP BY dataset_id) fc ON fc.dataset_id = d.id
+      WHERE d.status = 'active'
+      GROUP BY d.id, d.name, d.description, d.category, rc.cnt, fc.cnt
+      ORDER BY "lastAccessedAt" DESC
+      LIMIT 6
+    `;
+
+    const recentActivityQuery = `
+      SELECT 
+        al.id,
+        al.activity_type AS "activityType",
+        al.description,
+        al.entity_type AS "entityType",
+        al.entity_id AS "entityId",
+        al.created_at AS "createdAt"
+      FROM activity_logs al
+      WHERE al.user_id = $1
+      ORDER BY al.created_at DESC
+      LIMIT 8
+    `;
+
+    const [datasetsRes, savedViewsRes, recentDatasetsRes, recentActivityRes] = await Promise.all([
       this.pool.query(datasetsQuery, [user.roleName, user.id]),
       this.pool.query(savedViewsQuery, [user.id]),
+      this.pool.query(recentDatasetsQuery, [user.id]),
+      this.pool.query(recentActivityQuery, [user.id]),
     ]);
 
     const datasets = datasetsRes.rows;
@@ -162,6 +232,8 @@ export class PortalsService {
       },
       datasets,
       sharedViews: savedViewsRes.rows,
+      recentlyAccessedDatasets: recentDatasetsRes.rows,
+      recentActivity: recentActivityRes.rows,
     };
   }
 }

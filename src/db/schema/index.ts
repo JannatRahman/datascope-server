@@ -11,3 +11,4 @@ export * from "./query-performance.schema.js";
 export * from "./record-history.schema.js";
 export * from "./record-relationships.schema.js";
 export * from "./user-preferences.schema.js";
+export * from "./system-settings.schema.js";

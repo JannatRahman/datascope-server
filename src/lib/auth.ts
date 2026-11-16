@@ -5,7 +5,17 @@ import { eq } from "drizzle-orm";
 import { db } from "../config/database.js";
 import * as schema from "../db/schema/auth.schema.js";
 
+const trustedOrigins = [
+  process.env['CLIENT_URL'],
+  process.env['BETTER_AUTH_URL'],
+  'http://localhost:3000',
+  'http://127.0.0.1:3000',
+  'http://localhost',
+  'http://127.0.0.1',
+].filter((origin): origin is string => Boolean(origin));
+
 export const auth = betterAuth({
+  trustedOrigins,
   database: drizzleAdapter(db, {
     provider: "pg",
     schema: {
