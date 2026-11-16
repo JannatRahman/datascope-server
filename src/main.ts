@@ -53,9 +53,10 @@ async function bootstrap(): Promise<void> {
     },
   });
 
-  const port = Number(process.env['NEST_PORT'] ?? '5001');
+ const port = Number(process.env.PORT || process.env.NEST_PORT || 5001);
+await app.listen(port, '0.0.0.0');
   app.enableShutdownHooks();
-  await app.listen(port);
+ 
   console.log(`[NestJS] DataScope NestJS server running on port ${port}`);
   console.log(`[NestJS] Swagger documentation available at http://localhost:${port}/api/docs`);
 }
